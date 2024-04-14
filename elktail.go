@@ -9,28 +9,27 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/codegangsta/cli"
-	"golang.org/x/crypto/ssh/terminal"
-	"golang.org/x/net/context"
-	"gopkg.in/olivere/elastic.v5"
 	"io/ioutil"
 	"net/url"
 	"os"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/urfave/cli"
+	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/net/context"
+	"gopkg.in/olivere/elastic.v5"
 )
 
-//
 // Tail is a structure that holds data necessary to perform tailing.
-//
 type Tail struct {
-	client          *elastic.Client  //elastic search client that we'll use to contact EL
-	queryDefinition *QueryDefinition //structure containing query definition and formatting
-	indices         []string         //indices to search through
-	lastTimeStamp   string           //timestamp of the last result
-	lastIDs         []displayedEntry //result IDs that we fetched in the last query, used to avoid duplicates when using tailing query time window
-	order           bool             //search order - true = ascending (may be reversed in case date-after filtering)
+	client          *elastic.Client  // elastic search client that we'll use to contact EL
+	queryDefinition *QueryDefinition // structure containing query definition and formatting
+	indices         []string         // indices to search through
+	lastTimeStamp   string           // timestamp of the last result
+	lastIDs         []displayedEntry // result IDs that we fetched in the last query, used to avoid duplicates when using tailing query time window
+	order           bool             // search order - true = ascending (may be reversed in case date-after filtering)
 }
 
 type displayedEntry struct {
@@ -45,9 +44,11 @@ func (entry *displayedEntry) isBefore(timeStamp string) bool {
 // Regexp for parsing out format fields
 var formatRegexp = regexp.MustCompile("%[A-Za-z0-9@_.-]+")
 
-const dateFormatDMY = "2006-01-02"
-const dateFormatFull = "2006-01-02T15:04:05.999Z07:00"
-const tailingTimeWindow = 500
+const (
+	dateFormatDMY     = "2006-01-02"
+	dateFormatFull    = "2006-01-02T15:04:05.999Z07:00"
+	tailingTimeWindow = 500
+)
 
 // NewTail creates a new Tailer using configuration
 func NewTail(configuration *Configuration) *Tail {
@@ -55,7 +56,7 @@ func NewTail(configuration *Configuration) *Tail {
 
 	var client *elastic.Client
 	var err error
-	var url = configuration.SearchTarget.Url
+	url := configuration.SearchTarget.Url
 	if !strings.HasPrefix(url, "http") {
 		url = "http://" + url
 		Trace.Printf("Adding http:// prefix to given url. Url: " + url)
@@ -66,7 +67,7 @@ func NewTail(configuration *Configuration) *Tail {
 		Trace.Printf("No port was specified, adding default port 9200 to given url. Url: " + url)
 	}
 
-	//if a tunnel is successfully created, we need to connect to tunnel url (which is localhost on tunnel port)
+	// if a tunnel is successfully created, we need to connect to tunnel url (which is localhost on tunnel port)
 	if configuration.SearchTarget.TunnelUrl != "" {
 		url = configuration.SearchTarget.TunnelUrl
 	}
@@ -99,11 +100,11 @@ func NewTail(configuration *Configuration) *Tail {
 
 	tail.selectIndices(configuration)
 
-	//If we're date filtering on start date, then the sort needs to be ascending
+	// If we're date filtering on start date, then the sort needs to be ascending
 	if configuration.QueryDefinition.AfterDateTime != "" {
-		tail.order = true //ascending
+		tail.order = true // ascending
 	} else {
-		tail.order = false //descending
+		tail.order = false // descending
 	}
 	return tail
 }
@@ -152,16 +153,16 @@ func (tail *Tail) Start(follow bool, initialEntries int) {
 	for follow {
 		time.Sleep(delay)
 		if tail.lastTimeStamp != "" {
-			//we can execute follow up timestamp filtered query only if we fetched at least 1 result in initial query
+			// we can execute follow up timestamp filtered query only if we fetched at least 1 result in initial query
 			result, err = tail.client.Search().
 				Index(tail.indices...).
 				Sort(tail.queryDefinition.TimestampField, false).
 				From(0).
-				Size(9000). //TODO: needs rewrite this using scrolling, as this implementation may loose entries if there's more than 9K entries per sleep period
+				Size(9000). // TODO: needs rewrite this using scrolling, as this implementation may loose entries if there's more than 9K entries per sleep period
 				Query(tail.buildTimestampFilteredQuery()).
 				Do(context.Background())
 		} else {
-			//if lastTimeStamp is not defined we have to repeat the initial search until we get at least 1 result
+			// if lastTimeStamp is not defined we have to repeat the initial search until we get at least 1 result
 			result, err = tail.initialSearch(initialEntries)
 		}
 		if err != nil {
@@ -169,7 +170,7 @@ func (tail *Tail) Start(follow bool, initialEntries int) {
 		}
 		tail.processResults(result)
 
-		//Dynamic delay calculation for determining delay between search requests
+		// Dynamic delay calculation for determining delay between search requests
 		if result.TotalHits() > 0 && delay > 500*time.Millisecond {
 			delay = 500 * time.Millisecond
 		} else if delay <= 2000*time.Millisecond {
@@ -211,8 +212,7 @@ func (tail *Tail) processResults(searchResult *elastic.SearchResult) {
 			}
 			tail.lastIDs = append(tail.lastIDs, displayedEntry{timeStamp: timeStamp, id: hit.Id})
 		}
-
-	} else { //when results are in descending order, we need to process them in reverse
+	} else { // when results are in descending order, we need to process them in reverse
 		for i := len(hits) - 1; i >= 0; i-- {
 			hit := hits[i]
 			entry := tail.processHit(hit)
@@ -225,10 +225,10 @@ func (tail *Tail) processResults(searchResult *elastic.SearchResult) {
 	}
 	cutoffTime := formatElasticTimeStamp(parseElasticTimeStamp(tail.lastTimeStamp).Add(-tailingTimeWindow * time.Millisecond))
 	drainOldEntries(&tail.lastIDs, cutoffTime)
-	//fmt.Print("------------------------------------------------\n")
-	//Debugging IDs
-	//Info.Printf("CutOff time: %s", cutoffTime)
-	//Info.Printf("IDs: %v", tail.lastIDs)
+	// fmt.Print("------------------------------------------------\n")
+	// Debugging IDs
+	// Info.Printf("CutOff time: %s", cutoffTime)
+	// Info.Printf("IDs: %v", tail.lastIDs)
 }
 
 func parseElasticTimeStamp(elTimeStamp string) time.Time {
@@ -289,8 +289,8 @@ func (tail *Tail) buildSearchQuery() elastic.Query {
 	return query
 }
 
-//Builds range filter on timestamp field. You should only call this if start or end date times are defined
-//in query definition
+// Builds range filter on timestamp field. You should only call this if start or end date times are defined
+// in query definition
 func (tail *Tail) buildDateTimeRangeQuery() *elastic.RangeQuery {
 	filter := elastic.NewRangeQuery(tail.queryDefinition.TimestampField)
 	if tail.queryDefinition.AfterDateTime != "" {
@@ -370,7 +370,6 @@ func findLastIndex(indices []string, indexPattern string) string {
 }
 
 func main() {
-
 	config := new(Configuration)
 	app := cli.NewApp()
 	app.Name = "elktail"
@@ -380,7 +379,6 @@ func main() {
 	app.ArgsUsage = "[query-string]\n   Options marked with (*) are saved between invocations of the command. Each time you specify an option marked with (*) previously stored settings are erased."
 	app.Flags = config.Flags()
 	app.Action = func(c *cli.Context) {
-
 		if c.IsSet("help") {
 			cli.ShowAppHelp(c)
 			os.Exit(0)
@@ -417,11 +415,11 @@ func main() {
 			config.Password = readPasswd()
 		}
 
-		//reset TunnelUrl to nothing, we'll point to the tunnel if we actually manage to create it
+		// reset TunnelUrl to nothing, we'll point to the tunnel if we actually manage to create it
 		config.SearchTarget.TunnelUrl = ""
 		if config.SSHTunnelParams != "" {
-			//We need to start ssh tunnel and make el client connect to local port at localhost in order to pass
-			//traffic through the tunnel
+			// We need to start ssh tunnel and make el client connect to local port at localhost in order to pass
+			// traffic through the tunnel
 			elurl, err := url.Parse(config.SearchTarget.Url)
 			if err != nil {
 				Error.Fatalf("Failed to parse hostname/port from given URL: %s\n", config.SearchTarget.Url)
@@ -429,7 +427,7 @@ func main() {
 			Trace.Printf("SSHTunnel remote host: %s\n", elurl.Host)
 
 			tunnel := NewSSHTunnelFromHostStrings(config.SSHTunnelParams, elurl.Host)
-			//Using the TunnelUrl configuration param, we will signify the client to connect to tunnel
+			// Using the TunnelUrl configuration param, we will signify the client to connect to tunnel
 			config.SearchTarget.TunnelUrl = fmt.Sprintf("http://localhost:%d", tunnel.Local.Port)
 
 			Info.Printf("Starting SSH tunnel %d:%s@%s:%d to %s:%d", tunnel.Local.Port, tunnel.Config.User,
@@ -467,14 +465,13 @@ func main() {
 		}
 
 		tail := NewTail(config)
-		//If we don't exit here we can save the defaults
+		// If we don't exit here we can save the defaults
 		configToSave.SaveDefault()
 
 		tail.Start(!config.IsListOnly(), config.InitialEntries)
 	}
 
 	app.Run(os.Args)
-
 }
 
 // Must is a helper function to avoid boilerplate error handling for regex matches
